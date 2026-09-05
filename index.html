@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#07111f" />
+  <title>Trade Anomaly — USDJPY Time-of-Day Screener</title>
+  <meta name="description" content="USDJPY 1時間足の時刻アノマリーをJST基準でスクリーニング。勝率、平均リターン、Sharpeを期間別に比較。" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">USDJPY · H1 · JST</div>
+        <h1>Trade <span>Anomaly</span></h1>
+        <p class="lead">特定時刻で入り、一定時間だけ保有する“時間帯アノマリー”を直近約1年のUSDJPY 1時間足で総当たり。</p>
+      </div>
+      <div class="data-pill" id="dataStatus">
+        <span class="dot"></span>
+        <span>DATA LOADING…</span>
+      </div>
+    </header>
+
+    <section class="panel controls" aria-label="screening controls">
+      <div class="control-group period-group">
+        <label>Screening period</label>
+        <div class="segmented" id="periodPresets">
+          <button data-period="30">1M</button>
+          <button data-period="90">3M</button>
+          <button data-period="180" class="active">6M</button>
+          <button data-period="365">1Y</button>
+          <button data-period="custom">Custom</button>
+        </div>
+      </div>
+
+      <div class="control-group custom-dates hidden" id="customDates">
+        <label for="fromDate">From</label>
+        <input id="fromDate" type="date" />
+        <label for="toDate">To</label>
+        <input id="toDate" type="date" />
+      </div>
+
+      <div class="filter-grid">
+        <div class="control-group">
+          <label for="direction">Direction</label>
+          <select id="direction">
+            <option value="both">LONG + SHORT</option>
+            <option value="long">LONG only</option>
+            <option value="short">SHORT only</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label for="entryHour">Entry hour</label>
+          <select id="entryHour"><option value="all">All hours</option></select>
+        </div>
+        <div class="control-group">
+          <label for="holdHours">Hold</label>
+          <select id="holdHours"><option value="all">1–24 hours</option></select>
+        </div>
+        <div class="control-group">
+          <label for="minTrades">Min trades</label>
+          <select id="minTrades">
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="30" selected>30</option>
+            <option value="50">50</option>
+            <option value="80">80</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label for="sortMetric">Rank by</label>
+          <select id="sortMetric">
+            <option value="sharpe" selected>Sharpe</option>
+            <option value="winRate">Win rate</option>
+            <option value="avgRet">Avg return</option>
+            <option value="trades">Trades</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section class="stats-grid" id="summaryStats">
+      <article class="stat-card"><span>Strategies</span><strong id="strategyCount">—</strong><small>after filters</small></article>
+      <article class="stat-card"><span>Best Sharpe</span><strong id="bestSharpe">—</strong><small>per trade</small></article>
+      <article class="stat-card"><span>Best Win%</span><strong id="bestWin">—</strong><small>qualified</small></article>
+      <article class="stat-card"><span>Bars used</span><strong id="barsUsed">—</strong><small id="rangeLabel">—</small></article>
+    </section>
+
+    <section class="panel leaderboard">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">SCREENING RESULT</div>
+          <h2>Top 100 Strategies</h2>
+        </div>
+        <div class="legend"><span class="long-key">LONG</span><span class="short-key">SHORT</span></div>
+      </div>
+
+      <div class="desktop-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Dir</th>
+              <th>Entry</th>
+              <th>Exit</th>
+              <th>Hold</th>
+              <th>Trades</th>
+              <th>Win%</th>
+              <th>AvgRet%</th>
+              <th>Sharpe</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody"></tbody>
+        </table>
+      </div>
+      <div class="mobile-cards" id="mobileResults"></div>
+      <div class="empty-state hidden" id="emptyState">条件に合う戦略がありません。期間または最小取引数を緩めてください。</div>
+    </section>
+
+    <section class="panel detail hidden" id="detailPanel">
+      <div class="section-head detail-head">
+        <div>
+          <div class="eyebrow">STRATEGY DETAIL</div>
+          <h2 id="detailTitle">—</h2>
+        </div>
+        <button class="ghost-btn" id="closeDetail">Close</button>
+      </div>
+      <div class="detail-metrics" id="detailMetrics"></div>
+      <div class="chart-wrap">
+        <div class="chart-title-row"><span>Cumulative return</span><small>simple sum of trade returns</small></div>
+        <canvas id="equityChart" height="260"></canvas>
+      </div>
+      <div class="trade-sample-wrap">
+        <h3>Recent trades</h3>
+        <div class="recent-trades" id="recentTrades"></div>
+      </div>
+    </section>
+
+    <section class="method panel subtle">
+      <h3>How it is measured</h3>
+      <p>JSTのEntry時刻のH1バー始値でエントリーし、指定時間後のH1バー始値で決済。終了バーが存在しないケースは除外します。Sharpeは <code>mean(return) / sample std(return)</code> の非年率化値です。取引コスト、スリッページ、スワップは未反映です。</p>
+      <p class="warning">上位戦略は多数候補からの選抜なので、データスヌーピング／多重比較バイアスを含み得ます。探索結果はOOS検証や別期間検証を前提に扱ってください。</p>
+    </section>
+
+    <footer>
+      <span>Trade Anomaly</span>
+      <span id="footerMeta">Dukascopy bid H1</span>
+    </footer>
+  </main>
+  <script src="app.js" defer></script>
+</body>
+</html>
