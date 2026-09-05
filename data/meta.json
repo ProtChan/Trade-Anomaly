@@ -1,19 +1,23 @@
 {
+  "dataset_version": 2,
   "symbol": "USDJPY",
   "timeframe": "H1",
   "price_type": "mid",
   "mid_method": "Dukascopy full quote bars; fieldwise midpoint = (bid + ask) / 2; screener entry/exit uses mid_open",
   "timezone_source": "UTC",
   "display_timezone": "Asia/Tokyo (JST, UTC+9)",
-  "source": "Dukascopy datafeed full Bid+Ask H1 → Mid",
+  "source": "Dukascopy full Bid+Ask H1 → Mid",
+  "source_files_this_run": [
+    "usdjpy_h1_full.csv"
+  ],
   "bars": 6154,
   "first_timestamp": 1756944000000,
   "last_timestamp": 1788217200000,
   "first_utc": "2025-09-04T00:00:00Z",
   "last_utc": "2026-08-31T23:00:00Z",
-  "generated_utc": "2026-09-05T10:29:25.079714Z",
-  "mid_rows_this_run": 144,
-  "mean_spread_jpy_this_run": 0.006479166666666667,
+  "generated_utc": "2026-09-05T10:31:35.520844Z",
+  "mid_rows_loaded_this_run": 143,
+  "mean_spread_jpy_this_run": 0.00648951048951049,
   "max_spread_jpy_this_run": 0.136,
   "rolling_days": 365
 }
