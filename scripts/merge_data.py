@@ -12,7 +12,7 @@ from pathlib import Path
 DAY_MS = 86_400_000
 HOUR_MS = 3_600_000
 KEEP_DAYS = 365
-DATASET_VERSION = 4
+DATASET_VERSION = 5
 FIELDS = ("timestamp", "open", "high", "low", "close", "volume")
 
 
@@ -104,8 +104,14 @@ def aggregate_rows_to_h1(rows: dict[int, dict[str, float | int]]) -> dict[int, d
 
 def load_m1(path: Path) -> tuple[dict[int, dict[str, float | int]], list[float], int]:
     minute_rows, spreads = load_full(path)
-    bars = aggregate_rows_to_h1(minute_rows)
-    return bars, spreads, len(minute_rows)
+    # Direct datafeed may include zero-volume flat minutes while FX is closed.
+    # Excluding them prevents weekend/after-close synthetic H1 bars and makes
+    # each H1 open the first actually traded minute's midpoint.
+    active_rows = {ts: row for ts, row in minute_rows.items() if float(row["volume"]) > 0}
+    if not active_rows:
+        raise SystemExit(f"No active M1 rows with positive volume found: {path}")
+    bars = aggregate_rows_to_h1(active_rows)
+    return bars, spreads, len(active_rows)
 
 
 def load_ticks(path: Path) -> tuple[dict[int, dict[str, float | int]], list[float], int]:
@@ -151,7 +157,7 @@ def iso(ts: int) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--full-file", action="append", default=[], help="Dukascopy full Bid/Ask H1 CSV")
-    ap.add_argument("--m1-file", action="append", default=[], help="Dukascopy full Bid/Ask M1 CSV; aggregated to H1 and overrides matching hours")
+    ap.add_argument("--m1-file", action="append", default=[], help="Dukascopy full Bid/Ask M1 CSV; active minutes are aggregated to H1 and override matching hours")
     ap.add_argument("--tick-file", action="append", default=[], help="Dukascopy Bid/Ask tick CSV; aggregated to H1 and overrides matching hours")
     ap.add_argument("--output", default="data/usdjpy_h1.csv")
     ap.add_argument("--meta", default="data/meta.json")
@@ -188,8 +194,8 @@ def main() -> None:
         source = "Dukascopy H1 + recent raw Bid/Ask ticks → Mid H1"
         method = "Historical H1 uses full quote midpoint; recent H1 is aggregated from raw ticks with mid=(bid+ask)/2 per tick; screener uses mid_open"
     elif m1_sources:
-        source = "Dukascopy H1 + recent full Bid/Ask M1 → Mid H1"
-        method = "Historical H1 uses full quote midpoint; recent direct-datafeed M1 uses bid/ask midpoint columns and is aggregated to UTC H1; screener uses H1 mid_open"
+        source = "Dukascopy H1 + recent active Bid/Ask M1 → Mid H1"
+        method = "Historical H1 uses full quote midpoint; recent direct-datafeed M1 uses bid/ask midpoint columns, excludes zero-volume flat minutes, and is aggregated to UTC H1; screener uses H1 mid_open"
     else:
         source = "Dukascopy full Bid+Ask H1 → Mid"
         method = "Dukascopy full quote bars; fieldwise midpoint=(bid+ask)/2; screener uses mid_open"
