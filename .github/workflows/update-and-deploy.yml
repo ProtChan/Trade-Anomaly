@@ -19,14 +19,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  plan:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
-      from: ${{ steps.range.outputs.from }}
-      to: ${{ steps.range.outputs.to }}
-      reset: ${{ steps.range.outputs.reset }}
+      pages_enabled: ${{ steps.pages.outputs.enabled }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+
       - name: Decide download range and whether to rebuild
         id: range
         shell: bash
@@ -64,116 +72,65 @@ jobs:
             FROM=$(date -u -d '366 days ago' +%F)
             RESET=true
           fi
+
           echo "from=$FROM" >> "$GITHUB_OUTPUT"
           echo "to=$TO" >> "$GITHUB_OUTPUT"
           echo "reset=$RESET" >> "$GITHUB_OUTPUT"
-          echo "range=$FROM..$TO reset=$RESET"
+          echo "USDJPY H1 full quote range: $FROM -> $TO, reset=$RESET"
 
-  download_bid:
-    needs: plan
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Download bid H1
+      - name: Install Dukascopy full-quote downloader
         shell: bash
         run: |
-          mkdir -p download/bid
-          download() {
-            npx --yes dukascopy-node@1.50.0 \
-              -i usdjpy -from "${{ needs.plan.outputs.from }}" -to "${{ needs.plan.outputs.to }}" \
-              -t h1 -p bid -v -f csv -dir download/bid \
-              -bs 3 -bp 2000 -r 3 -rp 3000
-          }
-          if ! download; then
-            echo "JSON API path failed; falling back to direct-datafeed engine 1.46.4"
-            rm -rf download/bid && mkdir -p download/bid
-            npx --yes dukascopy-node@1.46.4 \
-              -i usdjpy -from "${{ needs.plan.outputs.from }}" -to "${{ needs.plan.outputs.to }}" \
-              -t h1 -p bid -v -f csv -dir download/bid \
-              -bs 3 -bp 2000 -r 3 -rp 3000
-          fi
-          test -n "$(find download/bid -name '*.csv' -type f -print -quit)"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: usdjpy-h1-bid
-          path: download/bid/*.csv
-          if-no-files-found: error
-          retention-days: 1
+          go install github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest
+          dukascopy-go --version || true
 
-  download_ask:
-    needs: plan
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Download ask H1
+      - name: Download Dukascopy full Bid+Ask H1 using datafeed engine
         shell: bash
         run: |
-          mkdir -p download/ask
-          download() {
-            npx --yes dukascopy-node@1.50.0 \
-              -i usdjpy -from "${{ needs.plan.outputs.from }}" -to "${{ needs.plan.outputs.to }}" \
-              -t h1 -p ask -v -f csv -dir download/ask \
-              -bs 3 -bp 2000 -r 3 -rp 3000
-          }
-          if ! download; then
-            echo "JSON API path failed; falling back to direct-datafeed engine 1.46.4"
-            rm -rf download/ask && mkdir -p download/ask
-            npx --yes dukascopy-node@1.46.4 \
-              -i usdjpy -from "${{ needs.plan.outputs.from }}" -to "${{ needs.plan.outputs.to }}" \
-              -t h1 -p ask -v -f csv -dir download/ask \
-              -bs 3 -bp 2000 -r 3 -rp 3000
-          fi
-          test -n "$(find download/ask -name '*.csv' -type f -print -quit)"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: usdjpy-h1-ask
-          path: download/ask/*.csv
-          if-no-files-found: error
-          retention-days: 1
+          rm -rf download
+          mkdir -p download
+          dukascopy-go download \
+            --symbol USDJPY \
+            --timeframe h1 \
+            --from "${{ steps.range.outputs.from }}" \
+            --to "${{ steps.range.outputs.to }}" \
+            --output download/usdjpy_h1_full.csv \
+            --engine datafeed \
+            --full \
+            --timezone UTC \
+            --no-progress \
+            --retries 5 \
+            --retry-backoff 2s \
+            --rate-limit 250ms
+          echo "Full quote CSV header:"
+          head -n 3 download/usdjpy_h1_full.csv
+          test -s download/usdjpy_h1_full.csv
 
-  build:
-    needs: [plan, download_bid, download_ask]
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    outputs:
-      pages_enabled: ${{ steps.pages.outputs.enabled }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: actions/download-artifact@v4
-        with:
-          name: usdjpy-h1-bid
-          path: download/bid
-      - uses: actions/download-artifact@v4
-        with:
-          name: usdjpy-h1-ask
-          path: download/ask
-
-      - name: Build matched H1 mid and validate
+      - name: Build rolling midpoint H1 and validate
         shell: bash
         run: |
           RESET_ARG=""
-          if [ "${{ needs.plan.outputs.reset }}" = "true" ]; then RESET_ARG="--reset-existing"; fi
+          if [ "${{ steps.range.outputs.reset }}" = "true" ]; then RESET_ARG="--reset-existing"; fi
           python scripts/merge_data.py \
-            --bid-dir download/bid \
-            --ask-dir download/ask \
+            --full-file download/usdjpy_h1_full.csv \
             --output data/usdjpy_h1.csv \
             --meta data/meta.json \
             $RESET_ARG
           python -m py_compile scripts/merge_data.py
           node --check app.js
           node --check pnl-chart-v3.js
+          python3 - <<'PY'
+          import csv, json
+          with open('data/meta.json', encoding='utf-8') as f:
+              meta = json.load(f)
+          assert meta['price_type'] == 'mid', meta
+          assert meta['bars'] >= 4000, meta
+          with open('data/usdjpy_h1.csv', newline='', encoding='utf-8') as f:
+              rows = list(csv.DictReader(f))
+          assert len(rows) == meta['bars']
+          assert all(float(rows[i]['open']) > 0 for i in range(min(20, len(rows))))
+          print('validated midpoint bars:', len(rows))
+          PY
           wc -l data/usdjpy_h1.csv
           cat data/meta.json
 
@@ -186,7 +143,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No data changes"
           else
-            git commit -m "data: refresh USDJPY H1 mid rolling year"
+            git commit -m "data: refresh USDJPY H1 midpoint rolling year"
             git pull --rebase origin main
             git push origin HEAD:main
           fi
@@ -220,6 +177,7 @@ jobs:
       - name: Configure Pages
         if: steps.pages.outputs.enabled == 'true'
         uses: actions/configure-pages@v5
+
       - name: Upload Pages artifact
         if: steps.pages.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v3
