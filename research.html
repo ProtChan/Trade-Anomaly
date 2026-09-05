@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#07111f" />
+  <title>Anomaly Essence Lab — USDJPY</title>
+  <meta name="description" content="USDJPY時刻アノマリーの期間安定性、変化点、レジーム依存性を長期データで分解。" />
+  <link rel="stylesheet" href="styles.css?v=7" />
+  <style>
+    .research-nav{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:18px}.research-nav a{color:inherit;text-decoration:none}
+    .research-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr);gap:18px}.research-list{max-height:760px;overflow:auto}
+    .research-row{display:grid;grid-template-columns:52px 1.4fr repeat(4,1fr);gap:10px;align-items:center;padding:12px 10px;border-bottom:1px solid rgba(148,163,184,.12);cursor:pointer}
+    .research-row:hover,.research-row.active{background:rgba(56,189,248,.07)}.research-row small{color:#8fa6bf}.research-row strong{font-variant-numeric:tabular-nums}
+    .lab-note{font-size:.9rem;line-height:1.65;color:#9fb1c7}.detail-stack{display:grid;gap:16px}.mini-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+    .mini{padding:12px;border:1px solid rgba(148,163,184,.13);border-radius:12px;background:rgba(2,8,23,.34)}.mini span{display:block;color:#8fa6bf;font-size:.74rem;text-transform:uppercase;letter-spacing:.06em}.mini strong{font-size:1.12rem}
+    .bar-list{display:grid;gap:8px}.bar-row{display:grid;grid-template-columns:110px 1fr 80px;gap:10px;align-items:center;font-size:.82rem}.bar-track{height:8px;border-radius:999px;background:rgba(148,163,184,.12);position:relative;overflow:hidden}.bar-fill{position:absolute;left:50%;top:0;height:100%;background:currentColor;border-radius:999px}.bar-fill.neg{right:50%;left:auto}.bar-row b{text-align:right;font-variant-numeric:tabular-nums}.muted{color:#8fa6bf}
+    .month-grid{display:grid;grid-template-columns:repeat(12,minmax(24px,1fr));gap:4px}.month-cell{aspect-ratio:1;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:.64rem;background:rgba(148,163,184,.09);color:#b9c7d6}.month-cell.pos{background:rgba(34,197,94,.16);color:#baf7ca}.month-cell.neg{background:rgba(239,68,68,.16);color:#fecaca}.month-cell.strong{outline:1px solid currentColor}
+    .cp{padding:9px 10px;border-left:2px solid #38bdf8;background:rgba(56,189,248,.06);border-radius:0 8px 8px 0;font-size:.82rem}.wf-row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid rgba(148,163,184,.1);font-size:.82rem}
+    @media(max-width:900px){.research-grid{grid-template-columns:1fr}.research-row{grid-template-columns:44px 1.5fr 1fr 1fr}.research-row .desktop-extra{display:none}.research-list{max-height:none}.mini-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">USDJPY · ANOMALY ESSENCE LAB</div>
+        <h1>When does the <span>edge</span> exist?</h1>
+        <p class="lead">利益最大化ではなく、時刻アノマリーの強さが「いつ・どの市場状態で」再現するかを分解する。期間選択を最適化せず、月別効果・年次walk-forward・変化点・レジーム依存を同時に見る。</p>
+        <div class="research-nav"><a class="ghost-btn" href="index.html">← Screener</a><span class="data-pill" id="researchStatus"><span class="dot"></span><span>LOADING…</span></span></div>
+      </div>
+    </header>
+
+    <section class="stats-grid">
+      <article class="stat-card"><span>History</span><strong id="historyYears">—</strong><small id="historyRange">—</small></article>
+      <article class="stat-card"><span>Strategies</span><strong id="strategyTotal">—</strong><small>24 entry × 24 hold</small></article>
+      <article class="stat-card"><span>Best robust score</span><strong id="bestRobust">—</strong><small>descriptive heuristic</small></article>
+      <article class="stat-card"><span>Best WF mean</span><strong id="bestWf">—</strong><small>prior-years direction</small></article>
+    </section>
+
+    <section class="panel subtle">
+      <div class="section-head"><div><div class="eyebrow">INTERPRETATION</div><h2>“本当の期間”ではなく“状態の再現性”を見る</h2></div></div>
+      <p class="lab-note">フルサンプルのLONG/SHORT方向は効果の符号を読みやすくするための記述用。より重要なのは、過去年だけで方向を決めて翌年を評価する <b>WF mean</b> と <b>WF positive ratio</b>。月別の <b>composition</b> は、その月に有利なボラ・活動度・round-number距離・24hトレンド状態が多かった影響を近似し、残差を構造変化候補として見る。</p>
+    </section>
+
+    <div class="research-grid">
+      <section class="panel leaderboard research-list">
+        <div class="section-head"><div><div class="eyebrow">ROBUSTNESS RANKING</div><h2>Temporal stability</h2></div></div>
+        <div id="strategyList"></div>
+      </section>
+
+      <section class="panel detail-stack" id="researchDetail">
+        <div><div class="eyebrow">SELECT A STRATEGY</div><h2 id="researchTitle">—</h2></div>
+        <div class="mini-grid" id="researchMetrics"></div>
+        <div><h3>Year walk-forward</h3><div id="wfYears"></div></div>
+        <div><h3>Regime dependence</h3><div id="regimeEffects" class="bar-list"></div></div>
+        <div><h3>Monthly edge map</h3><div id="monthMap" class="month-grid"></div><p class="lab-note" id="monthNote"></p></div>
+        <div><h3>Change-point candidates</h3><div id="changePoints"></div></div>
+      </section>
+    </div>
+
+    <section class="method panel subtle">
+      <h3>State variables</h3>
+      <p id="stateDefinitions" class="lab-note">—</p>
+      <p class="warning">このページは多重比較を消すものではありません。強い候補を見つけるより、「同じ符号・同じ条件依存が時間をまたいで残るか」を調べるための診断画面です。変化点は記述的候補であり、形式的な発見確率ではありません。</p>
+    </section>
+
+    <footer><span>Anomaly Essence Lab</span><span id="researchMeta">generated from USDJPY H1 mid</span></footer>
+  </main>
+  <script src="research.js?v=1" defer></script>
+</body>
+</html>

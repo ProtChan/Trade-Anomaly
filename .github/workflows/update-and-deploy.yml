@@ -1,4 +1,4 @@
-name: Update USDJPY H1 mid and deploy
+name: Update USDJPY long-history research and deploy
 
 on:
   push:
@@ -15,7 +15,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: trade-anomaly-mid-v6
+  group: trade-anomaly-mid-v7
   cancel-in-progress: true
 
 jobs:
@@ -31,12 +31,12 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Set rolling-year and recent M1 ranges
+      - name: Set ten-year H1 and recent M1 ranges
         id: range
         shell: bash
         run: |
           TO=$(date -u +%F)
-          FROM=$(date -u -d '366 days ago' +%F)
+          FROM=$(date -u -d '3651 days ago' +%F)
           RECENT_FROM=$(date -u -d '7 days ago' +%F)
           echo "from=$FROM" >> "$GITHUB_OUTPUT"
           echo "to=$TO" >> "$GITHUB_OUTPUT"
@@ -97,50 +97,62 @@ jobs:
           head -n 3 download/usdjpy_recent_m1_full.csv
           test -s download/usdjpy_recent_m1_full.csv
 
-      - name: Build clean rolling midpoint H1 and validate September coverage
+      - name: Build long midpoint H1 and anomaly research dataset
         shell: bash
         run: |
-          python scripts/merge_data.py \
+          python scripts/merge_long_data.py \
             --full-file download/usdjpy_h1_full.csv \
             --m1-file download/usdjpy_recent_m1_full.csv \
             --output data/usdjpy_h1.csv \
             --meta data/meta.json \
             --reset-existing
-          python -m py_compile scripts/merge_data.py
+          python scripts/analyze_anomaly.py \
+            --input data/usdjpy_h1.csv \
+            --output data/anomaly_research.json \
+            --detail-limit 120
+          python -m py_compile scripts/merge_data.py scripts/merge_long_data.py scripts/analyze_anomaly.py
           node --check app.js
           node --check detail-fix-v6.js
+          node --check research.js
           python3 - <<'PY'
           import csv, json
           from datetime import datetime, timezone
           with open('data/meta.json', encoding='utf-8') as f:
               meta = json.load(f)
           assert meta['price_type'] == 'mid', meta
-          assert int(meta.get('dataset_version', 0)) >= 4, meta
-          assert meta['bars'] >= 4000, meta
+          assert int(meta.get('dataset_version', 0)) >= 6, meta
+          assert int(meta.get('rolling_days', 0)) >= 3000, meta
+          assert meta['bars'] >= 40000, meta
           assert int(meta.get('m1_rows_loaded_this_run', 0)) > 0, meta
           sep1 = int(datetime(2026, 9, 1, tzinfo=timezone.utc).timestamp() * 1000)
           assert int(meta['last_timestamp']) >= sep1, meta
           with open('data/usdjpy_h1.csv', newline='', encoding='utf-8') as f:
               rows = list(csv.DictReader(f))
           assert len(rows) == meta['bars']
+          with open('data/anomaly_research.json', encoding='utf-8') as f:
+              research = json.load(f)
+          assert len(research.get('strategy_summaries', [])) >= 500, len(research.get('strategy_summaries', []))
+          assert len(research.get('strategy_details', [])) >= 100, len(research.get('strategy_details', []))
+          assert len(research.get('data', {}).get('years', [])) >= 8, research.get('data')
           september = [r for r in rows if int(float(r['timestamp'])) >= sep1]
           assert september, 'September rows missing'
           assert all(float(r['open']) > 0 for r in september), 'invalid September mid open'
-          print('validated midpoint bars:', len(rows), 'September H1:', len(september), 'last:', meta['last_utc'], 'M1 rows:', meta['m1_rows_loaded_this_run'])
+          print('validated midpoint bars:', len(rows), 'years:', research['data']['years'], 'strategies:', len(research['strategy_summaries']), 'last:', meta['last_utc'])
           PY
           wc -l data/usdjpy_h1.csv
+          ls -lh data/anomaly_research.json
           cat data/meta.json
 
-      - name: Commit refreshed mid data
+      - name: Commit refreshed research data
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/usdjpy_h1.csv data/meta.json
+          git add data/usdjpy_h1.csv data/meta.json data/anomaly_research.json
           if git diff --cached --quiet; then
             echo "No data changes"
           else
-            git commit -m "data: refresh USDJPY H1 midpoint with recent M1 quotes"
+            git commit -m "data: refresh USDJPY long-history anomaly research"
             git pull --rebase origin main
             git push origin HEAD:main
           fi
@@ -149,7 +161,7 @@ jobs:
         run: |
           rm -rf _site
           mkdir -p _site
-          cp index.html styles.css chart-html.css app.js detail-fix-v6.js _site/
+          cp index.html research.html styles.css chart-html.css app.js detail-fix-v6.js research.js _site/
           cp -R data _site/data
           touch _site/.nojekyll
 
