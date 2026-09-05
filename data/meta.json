@@ -1,0 +1,16 @@
+{
+  "symbol": "USDJPY",
+  "timeframe": "H1",
+  "price_type": "bid",
+  "timezone_source": "UTC",
+  "display_timezone": "Asia/Tokyo (JST, UTC+9)",
+  "source": "Dukascopy bid H1",
+  "bars": 6227,
+  "first_timestamp": 1757016000000,
+  "last_timestamp": 1788552000000,
+  "first_utc": "2025-09-04T20:00:00Z",
+  "last_utc": "2026-09-04T20:00:00Z",
+  "generated_utc": "2026-09-05T09:50:00.547268Z",
+  "downloaded_rows_this_run": 6247,
+  "rolling_days": 365
+}
