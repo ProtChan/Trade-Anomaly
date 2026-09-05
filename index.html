@@ -5,16 +5,16 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#07111f" />
   <title>Trade Anomaly — USDJPY Time-of-Day Screener</title>
-  <meta name="description" content="USDJPY 1時間足の時刻アノマリーをJST基準でスクリーニング。勝率、平均リターン、Sharpeを期間別に比較。" />
-  <link rel="stylesheet" href="styles.css" />
+  <meta name="description" content="USDJPY 1時間足の時刻アノマリーをJST基準でスクリーニング。Bid/Askから生成したMid価格で勝率、平均リターン、Sharpeを期間別に比較。" />
+  <link rel="stylesheet" href="styles.css?v=3" />
 </head>
 <body>
   <main class="shell">
     <header class="hero">
       <div>
-        <div class="eyebrow">USDJPY · H1 · JST</div>
+        <div class="eyebrow">USDJPY · H1 MID · JST</div>
         <h1>Trade <span>Anomaly</span></h1>
-        <p class="lead">特定時刻で入り、一定時間だけ保有する“時間帯アノマリー”を直近約1年のUSDJPY 1時間足で総当たり。</p>
+        <p class="lead">特定時刻で入り、一定時間だけ保有する“時間帯アノマリー”を直近約1年のUSDJPY 1時間足で総当たり。Bid/Askから生成したMid価格を使用。</p>
       </div>
       <div class="data-pill" id="dataStatus">
         <span class="dot"></span>
@@ -129,7 +129,7 @@
       </div>
       <div class="detail-metrics" id="detailMetrics"></div>
       <div class="chart-wrap">
-        <div class="chart-title-row"><span>Cumulative return</span><small>interactive P&amp;L · simple sum of trade returns</small></div>
+        <div class="chart-title-row"><span>Cumulative return</span><small>interactive P&amp;L · Mid H1 open basis</small></div>
         <canvas id="equityChart" height="260"></canvas>
       </div>
       <div class="trade-sample-wrap">
@@ -140,16 +140,16 @@
 
     <section class="method panel subtle">
       <h3>How it is measured</h3>
-      <p>JSTのEntry時刻のH1バー始値でエントリーし、指定時間後のH1バー始値で決済。終了バーが存在しないケースは除外します。Sharpeは <code>mean(return) / sample std(return)</code> の非年率化値です。取引コスト、スリッページ、スワップは未反映です。</p>
-      <p class="warning">上位戦略は多数候補からの選抜なので、データスヌーピング／多重比較バイアスを含み得ます。探索結果はOOS検証や別期間検証を前提に扱ってください。</p>
+      <p>Dukascopyの同時刻Bid/Ask H1から <code>Mid = (Bid + Ask) / 2</code> を生成し、JSTのEntry時刻のMid H1始値でエントリー、指定時間後のMid H1始値で決済します。終了バーが存在しないケースは除外。Sharpeは <code>mean(return) / sample std(return)</code> の非年率化値です。</p>
+      <p class="warning">Mid基準なので早朝のBid/Askスプレッド拡大そのものによる片側価格の歪みは除きます。一方、実売買のスプレッド・スリッページ・スワップは未反映です。上位戦略は多重比較バイアスを含み得るためOOS検証前提です。</p>
     </section>
 
     <footer>
       <span>Trade Anomaly</span>
-      <span id="footerMeta">Dukascopy bid H1</span>
+      <span id="footerMeta">Dukascopy bid+ask H1 → mid</span>
     </footer>
   </main>
-  <script src="app.js" defer></script>
-  <script src="interactive-chart.js" defer></script>
+  <script src="app.js?v=3" defer></script>
+  <script src="pnl-chart.js?v=3" defer></script>
 </body>
 </html>
