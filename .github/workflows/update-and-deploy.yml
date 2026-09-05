@@ -1,4 +1,4 @@
-name: Update USDJPY H1 and deploy
+name: Update USDJPY H1 mid and deploy
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
     paths-ignore:
       - 'data/**'
   schedule:
-    # 17:20 JST, Mon-Sat. Existing data is updated incrementally.
+    # 17:20 JST, Mon-Sat. Once converted to mid, refresh the latest week incrementally.
     - cron: '20 8 * * 1-6'
   workflow_dispatch:
 
@@ -36,12 +36,25 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Decide download range
+      - name: Decide download range and whether to rebuild
         id: range
         shell: bash
         run: |
           TO=$(date -u +%F)
-          if [ -s data/usdjpy_h1.csv ]; then
+          IS_MID=false
+          if [ -s data/usdjpy_h1.csv ] && [ -s data/meta.json ]; then
+            IS_MID=$(python3 - <<'PY'
+          import json
+          try:
+              with open('data/meta.json', encoding='utf-8') as f:
+                  print('true' if json.load(f).get('price_type') == 'mid' else 'false')
+          except Exception:
+              print('false')
+          PY
+          )
+          fi
+
+          if [ "$IS_MID" = "true" ]; then
             FROM=$(python3 - <<'PY'
           import csv
           from datetime import datetime, timedelta, timezone
@@ -52,22 +65,26 @@ jobs:
                   except Exception: pass
           if last is None:
               raise SystemExit(1)
-          d = datetime.fromtimestamp(last/1000, tz=timezone.utc) - timedelta(days=7)
-          print(d.date().isoformat())
+          print((datetime.fromtimestamp(last/1000, tz=timezone.utc) - timedelta(days=7)).date().isoformat())
           PY
           )
+            RESET=false
           else
             FROM=$(date -u -d '366 days ago' +%F)
+            RESET=true
           fi
+
           echo "from=$FROM" >> "$GITHUB_OUTPUT"
           echo "to=$TO" >> "$GITHUB_OUTPUT"
-          echo "Downloading USDJPY H1: $FROM -> $TO (UTC)"
+          echo "reset=$RESET" >> "$GITHUB_OUTPUT"
+          echo "Downloading USDJPY H1 bid+ask: $FROM -> $TO (UTC), reset=$RESET"
 
-      - name: Download Dukascopy USDJPY H1 bid candles
+      - name: Download Dukascopy USDJPY H1 bid and ask candles
         shell: bash
         run: |
           rm -rf download
-          mkdir -p download
+          mkdir -p download/bid download/ask
+
           npx --yes dukascopy-node@1.50.0 \
             -i usdjpy \
             -from "${{ steps.range.outputs.from }}" \
@@ -76,23 +93,46 @@ jobs:
             -p bid \
             -v \
             -f csv \
-            -dir download \
+            -dir download/bid \
             -bs 40 \
             -bp 250 \
             -r 2 \
             -rp 750
-          find download -type f -maxdepth 3 -print
 
-      - name: Normalize, merge and validate rolling year
+          npx --yes dukascopy-node@1.50.0 \
+            -i usdjpy \
+            -from "${{ steps.range.outputs.from }}" \
+            -to "${{ steps.range.outputs.to }}" \
+            -t h1 \
+            -p ask \
+            -v \
+            -f csv \
+            -dir download/ask \
+            -bs 40 \
+            -bp 250 \
+            -r 2 \
+            -rp 750
+
+          find download -type f -maxdepth 4 -print
+
+      - name: Build matched H1 mid, merge and validate rolling year
+        shell: bash
         run: |
-          python scripts/merge_data.py --download-dir download --output data/usdjpy_h1.csv --meta data/meta.json
+          RESET_ARG=""
+          if [ "${{ steps.range.outputs.reset }}" = "true" ]; then RESET_ARG="--reset-existing"; fi
+          python scripts/merge_data.py \
+            --bid-dir download/bid \
+            --ask-dir download/ask \
+            --output data/usdjpy_h1.csv \
+            --meta data/meta.json \
+            $RESET_ARG
           python -m py_compile scripts/merge_data.py
           node --check app.js
-          node --check interactive-chart.js
+          node --check pnl-chart.js
           wc -l data/usdjpy_h1.csv
           cat data/meta.json
 
-      - name: Commit refreshed data
+      - name: Commit refreshed mid data
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
@@ -101,7 +141,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No data changes"
           else
-            git commit -m "data: refresh USDJPY H1 rolling year"
+            git commit -m "data: refresh USDJPY H1 mid rolling year"
             git pull --rebase origin main
             git push origin HEAD:main
           fi
@@ -110,7 +150,7 @@ jobs:
         run: |
           rm -rf _site
           mkdir -p _site
-          cp index.html styles.css app.js interactive-chart.js _site/
+          cp index.html styles.css app.js pnl-chart.js _site/
           cp -R data _site/data
           touch _site/.nojekyll
 
