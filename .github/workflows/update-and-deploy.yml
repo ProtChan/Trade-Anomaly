@@ -31,10 +31,6 @@ jobs:
         with:
           python-version: '3.12'
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.26.x'
-
       - name: Decide download range and whether to rebuild
         id: range
         shell: bash
@@ -78,10 +74,16 @@ jobs:
           echo "reset=$RESET" >> "$GITHUB_OUTPUT"
           echo "USDJPY H1 full quote range: $FROM -> $TO, reset=$RESET"
 
-      - name: Install Dukascopy full-quote downloader
+      - name: Install pinned Dukascopy full-quote downloader
         shell: bash
         run: |
-          go install github.com/Nosvemos/dukascopy-go/cmd/dukascopy-go@latest
+          curl -fL --retry 4 --retry-delay 2 \
+            https://github.com/Nosvemos/dukascopy-go/releases/download/v0.2.0/dukascopy-go_0.2.0_linux_amd64.tar.gz \
+            -o /tmp/dukascopy-go.tgz
+          tar -xzf /tmp/dukascopy-go.tgz -C /tmp
+          BIN=$(find /tmp -maxdepth 2 -type f -name 'dukascopy-go' -print -quit)
+          test -n "$BIN"
+          sudo install -m 0755 "$BIN" /usr/local/bin/dukascopy-go
           dukascopy-go --version || true
 
       - name: Download Dukascopy full Bid+Ask H1 using datafeed engine
