@@ -15,13 +15,13 @@ permissions:
   id-token: write
 
 concurrency:
-  group: trade-anomaly-mid-v5
+  group: trade-anomaly-mid-v6
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 30
     outputs:
       pages_enabled: ${{ steps.pages.outputs.enabled }}
     steps:
@@ -31,17 +31,17 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Set rolling-year and recent tick ranges
+      - name: Set rolling-year and recent M1 ranges
         id: range
         shell: bash
         run: |
           TO=$(date -u +%F)
           FROM=$(date -u -d '366 days ago' +%F)
-          TICK_FROM=$(date -u -d '7 days ago' +%F)
+          RECENT_FROM=$(date -u -d '7 days ago' +%F)
           echo "from=$FROM" >> "$GITHUB_OUTPUT"
           echo "to=$TO" >> "$GITHUB_OUTPUT"
-          echo "tick_from=$TICK_FROM" >> "$GITHUB_OUTPUT"
-          echo "H1 baseline: $FROM -> $TO; raw tick midpoint refresh: $TICK_FROM -> $TO"
+          echo "recent_from=$RECENT_FROM" >> "$GITHUB_OUTPUT"
+          echo "H1 baseline: $FROM -> $TO; direct M1 midpoint refresh: $RECENT_FROM -> $TO"
 
       - name: Install pinned Dukascopy downloader
         shell: bash
@@ -77,32 +77,32 @@ jobs:
           head -n 3 download/usdjpy_h1_full.csv
           test -s download/usdjpy_h1_full.csv
 
-      - name: Download recent raw Bid+Ask ticks
+      - name: Download recent direct Bid+Ask M1 quotes
         shell: bash
         run: |
           dukascopy-go download \
             --symbol USDJPY \
-            --timeframe tick \
-            --from "${{ steps.range.outputs.tick_from }}" \
+            --timeframe m1 \
+            --from "${{ steps.range.outputs.recent_from }}" \
             --to "${{ steps.range.outputs.to }}" \
-            --output download/usdjpy_recent_ticks.csv \
+            --output download/usdjpy_recent_m1_full.csv \
             --engine datafeed \
-            --simple \
+            --full \
             --timezone UTC \
             --no-progress \
             --retries 6 \
             --retry-backoff 2s \
             --rate-limit 100ms
-          echo "Tick CSV preview:"
-          head -n 3 download/usdjpy_recent_ticks.csv
-          test -s download/usdjpy_recent_ticks.csv
+          echo "Recent M1 preview:"
+          head -n 3 download/usdjpy_recent_m1_full.csv
+          test -s download/usdjpy_recent_m1_full.csv
 
       - name: Build clean rolling midpoint H1 and validate September coverage
         shell: bash
         run: |
           python scripts/merge_data.py \
             --full-file download/usdjpy_h1_full.csv \
-            --tick-file download/usdjpy_recent_ticks.csv \
+            --m1-file download/usdjpy_recent_m1_full.csv \
             --output data/usdjpy_h1.csv \
             --meta data/meta.json \
             --reset-existing
@@ -114,17 +114,18 @@ jobs:
           with open('data/meta.json', encoding='utf-8') as f:
               meta = json.load(f)
           assert meta['price_type'] == 'mid', meta
-          assert int(meta.get('dataset_version', 0)) >= 3, meta
+          assert int(meta.get('dataset_version', 0)) >= 4, meta
           assert meta['bars'] >= 4000, meta
-          assert int(meta.get('raw_ticks_loaded_this_run', 0)) > 0, meta
+          assert int(meta.get('m1_rows_loaded_this_run', 0)) > 0, meta
           sep1 = int(datetime(2026, 9, 1, tzinfo=timezone.utc).timestamp() * 1000)
           assert int(meta['last_timestamp']) >= sep1, meta
           with open('data/usdjpy_h1.csv', newline='', encoding='utf-8') as f:
               rows = list(csv.DictReader(f))
           assert len(rows) == meta['bars']
-          assert any(int(float(r['timestamp'])) >= sep1 for r in rows), 'September rows missing'
-          assert all(float(rows[i]['open']) > 0 for i in range(min(20, len(rows))))
-          print('validated midpoint bars:', len(rows), 'last:', meta['last_utc'], 'ticks:', meta['raw_ticks_loaded_this_run'])
+          september = [r for r in rows if int(float(r['timestamp'])) >= sep1]
+          assert september, 'September rows missing'
+          assert all(float(r['open']) > 0 for r in september), 'invalid September mid open'
+          print('validated midpoint bars:', len(rows), 'September H1:', len(september), 'last:', meta['last_utc'], 'M1 rows:', meta['m1_rows_loaded_this_run'])
           PY
           wc -l data/usdjpy_h1.csv
           cat data/meta.json
@@ -138,7 +139,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No data changes"
           else
-            git commit -m "data: refresh USDJPY H1 midpoint with recent raw ticks"
+            git commit -m "data: refresh USDJPY H1 midpoint with recent M1 quotes"
             git pull --rebase origin main
             git push origin HEAD:main
           fi
