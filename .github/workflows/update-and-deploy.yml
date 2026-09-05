@@ -80,8 +80,9 @@ jobs:
           curl -fL --retry 4 --retry-delay 2 \
             https://github.com/Nosvemos/dukascopy-go/releases/download/v0.2.0/dukascopy-go_0.2.0_linux_amd64.tar.gz \
             -o /tmp/dukascopy-go.tgz
-          tar -xzf /tmp/dukascopy-go.tgz -C /tmp
-          BIN=$(find /tmp -maxdepth 2 -type f -name 'dukascopy-go' -print -quit)
+          mkdir -p /tmp/dukascopy-bin
+          tar -xzf /tmp/dukascopy-go.tgz -C /tmp/dukascopy-bin
+          BIN=$(find /tmp/dukascopy-bin -maxdepth 2 -type f -name 'dukascopy-go' -print -quit 2>/dev/null)
           test -n "$BIN"
           sudo install -m 0755 "$BIN" /usr/local/bin/dukascopy-go
           dukascopy-go --version || true
