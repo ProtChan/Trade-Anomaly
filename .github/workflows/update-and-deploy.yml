@@ -31,52 +31,17 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Decide download range and whether to clean rebuild
+      - name: Set clean rolling-year range
         id: range
         shell: bash
         run: |
           TO=$(date -u +%F)
-          IS_CURRENT=false
-          if [ -s data/usdjpy_h1.csv ] && [ -s data/meta.json ]; then
-            IS_CURRENT=$(python3 - <<'PY'
-          import json
-          try:
-              with open('data/meta.json', encoding='utf-8') as f:
-                  m = json.load(f)
-              ok = m.get('price_type') == 'mid' and int(m.get('dataset_version', 0)) >= 2
-              print('true' if ok else 'false')
-          except Exception:
-              print('false')
-          PY
-          )
-          fi
-
-          if [ "$IS_CURRENT" = "true" ]; then
-            FROM=$(python3 - <<'PY'
-          import csv
-          from datetime import datetime, timedelta, timezone
-          last = None
-          with open('data/usdjpy_h1.csv', newline='', encoding='utf-8') as f:
-              for row in csv.DictReader(f):
-                  try: last = int(float(row['timestamp']))
-                  except Exception: pass
-          if last is None:
-              raise SystemExit(1)
-          print((datetime.fromtimestamp(last/1000, tz=timezone.utc) - timedelta(days=7)).date().isoformat())
-          PY
-          )
-            RESET=false
-          else
-            FROM=$(date -u -d '366 days ago' +%F)
-            RESET=true
-          fi
+          FROM=$(date -u -d '366 days ago' +%F)
           RECENT_FROM=$(date -u -d '14 days ago' +%F)
-
           echo "from=$FROM" >> "$GITHUB_OUTPUT"
           echo "to=$TO" >> "$GITHUB_OUTPUT"
           echo "recent_from=$RECENT_FROM" >> "$GITHUB_OUTPUT"
-          echo "reset=$RESET" >> "$GITHUB_OUTPUT"
-          echo "USDJPY H1 full quote range: $FROM -> $TO, recent=$RECENT_FROM -> $TO, reset=$RESET"
+          echo "Clean midpoint rebuild: $FROM -> $TO; recent quote refresh: $RECENT_FROM -> $TO"
 
       - name: Install pinned Dukascopy full-quote downloader
         shell: bash
@@ -142,11 +107,9 @@ jobs:
             echo "Recent Jetta full-quote refresh unavailable; using datafeed baseline only"
           fi
 
-      - name: Build rolling midpoint H1 and validate
+      - name: Build clean rolling midpoint H1 and validate
         shell: bash
         run: |
-          RESET_ARG=""
-          if [ "${{ steps.range.outputs.reset }}" = "true" ]; then RESET_ARG="--reset-existing"; fi
           FILES=(--full-file download/usdjpy_h1_full.csv)
           if [ "${{ steps.recent.outputs.available }}" = "true" ]; then
             FILES+=(--full-file download/usdjpy_h1_recent.csv)
@@ -155,7 +118,7 @@ jobs:
             "${FILES[@]}" \
             --output data/usdjpy_h1.csv \
             --meta data/meta.json \
-            $RESET_ARG
+            --reset-existing
           python -m py_compile scripts/merge_data.py
           node --check app.js
           node --check pnl-chart-v3.js
@@ -170,7 +133,7 @@ jobs:
               rows = list(csv.DictReader(f))
           assert len(rows) == meta['bars']
           assert all(float(rows[i]['open']) > 0 for i in range(min(20, len(rows))))
-          print('validated midpoint bars:', len(rows), 'last:', meta['last_utc'])
+          print('validated clean midpoint bars:', len(rows), 'last:', meta['last_utc'])
           PY
           wc -l data/usdjpy_h1.csv
           cat data/meta.json
@@ -184,7 +147,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No data changes"
           else
-            git commit -m "data: refresh USDJPY H1 midpoint rolling year"
+            git commit -m "data: rebuild USDJPY H1 midpoint rolling year"
             git pull --rebase origin main
             git push origin HEAD:main
           fi
