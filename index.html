@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#07111f" />
   <title>Trade Anomaly — USDJPY Time-of-Day Screener</title>
-  <meta name="description" content="USDJPY 1時間足の時刻アノマリーをJST基準でスクリーニング。Bid/Askから生成したMid価格で勝率、平均リターン、Sharpeを期間別に比較。" />
+  <meta name="description" content="USDJPY 1時間足の時刻アノマリーをJST基準でスクリーニング。長期Bid/Askから生成したMid価格で勝率、平均リターン、Sharpeを期間別に比較。" />
   <link rel="stylesheet" href="styles.css?v=6" />
   <link rel="stylesheet" href="chart-html.css?v=2" />
 </head>
@@ -15,7 +15,8 @@
       <div>
         <div class="eyebrow">USDJPY · H1 MID · JST</div>
         <h1>Trade <span>Anomaly</span></h1>
-        <p class="lead">特定時刻で入り、一定時間だけ保有する“時間帯アノマリー”を直近約1年のUSDJPY 1時間足で総当たり。Bid/Askから生成したMid価格を使用。</p>
+        <p class="lead">特定時刻で入り、一定時間だけ保有する“時間帯アノマリー”を長期USDJPY 1時間足で総当たり。Bid/Askから生成したMid価格を使用。</p>
+        <p><a class="ghost-btn" href="research.html">Anomaly Essence Lab →</a></p>
       </div>
       <div class="data-pill" id="dataStatus">
         <span class="dot"></span>
@@ -31,6 +32,9 @@
           <button data-period="90">3M</button>
           <button data-period="180" class="active">6M</button>
           <button data-period="365">1Y</button>
+          <button data-period="1095">3Y</button>
+          <button data-period="1825">5Y</button>
+          <button data-period="3650">10Y</button>
           <button data-period="custom">Custom</button>
         </div>
       </div>
@@ -144,7 +148,7 @@
     <section class="method panel subtle">
       <h3>How it is measured</h3>
       <p>通常期間はDukascopyのBid/Ask H1からMidを生成し、直近期間はBid/Askの1分足からMidを作ってUTC 1時間足へ集約します。JSTのEntry時刻のMid H1始値でエントリー、指定時間後のMid H1始値で決済します。</p>
-      <p class="warning">Mid基準なので早朝のBid/Askスプレッド拡大そのものによる片側価格の歪みは除きます。一方、実売買のスプレッド・スリッページ・スワップは未反映です。上位戦略は多重比較バイアスを含み得るためOOS検証前提です。</p>
+      <p class="warning">Mid基準なので早朝のBid/Askスプレッド拡大そのものによる片側価格の歪みは除きます。一方、実売買のスプレッド・スリッページ・スワップは未反映です。上位戦略は多重比較バイアスを含み得るため、ランキングは候補抽出、Anomaly Essence Labは期間・状態依存の診断として使ってください。</p>
     </section>
 
     <footer>
