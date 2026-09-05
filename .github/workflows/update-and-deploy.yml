@@ -108,6 +108,7 @@ jobs:
             --reset-existing
           python -m py_compile scripts/merge_data.py
           node --check app.js
+          node --check detail-fix-v6.js
           python3 - <<'PY'
           import csv, json
           from datetime import datetime, timezone
@@ -148,7 +149,7 @@ jobs:
         run: |
           rm -rf _site
           mkdir -p _site
-          cp index.html styles.css chart-html.css app.js _site/
+          cp index.html styles.css chart-html.css app.js detail-fix-v6.js _site/
           cp -R data _site/data
           touch _site/.nojekyll
 
