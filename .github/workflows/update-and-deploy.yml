@@ -6,7 +6,6 @@ on:
     paths-ignore:
       - 'data/**'
   schedule:
-    # 17:20 JST, Mon-Sat. Once converted to mid, refresh the latest week incrementally.
     - cron: '20 8 * * 1-6'
   workflow_dispatch:
 
@@ -20,22 +19,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
     outputs:
-      pages_enabled: ${{ steps.pages.outputs.enabled }}
+      from: ${{ steps.range.outputs.from }}
+      to: ${{ steps.range.outputs.to }}
+      reset: ${{ steps.range.outputs.reset }}
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
       - name: Decide download range and whether to rebuild
         id: range
         shell: bash
@@ -73,58 +64,107 @@ jobs:
             FROM=$(date -u -d '366 days ago' +%F)
             RESET=true
           fi
-
           echo "from=$FROM" >> "$GITHUB_OUTPUT"
           echo "to=$TO" >> "$GITHUB_OUTPUT"
           echo "reset=$RESET" >> "$GITHUB_OUTPUT"
-          echo "Downloading USDJPY H1 bid+ask: $FROM -> $TO (UTC), reset=$RESET"
+          echo "range=$FROM..$TO reset=$RESET"
 
-      - name: Download Dukascopy USDJPY H1 bid and ask candles
+  download_bid:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Download bid H1
         shell: bash
         run: |
-          rm -rf download
-          mkdir -p download/bid download/ask
-
-          download_side() {
-            side="$1"
-            dir="$2"
-            for attempt in 1 2 3 4; do
-              echo "Downloading $side H1, attempt $attempt/4"
-              rm -f "$dir"/*.csv || true
-              if npx --yes dukascopy-node@1.50.0 \
-                -i usdjpy \
-                -from "${{ steps.range.outputs.from }}" \
-                -to "${{ steps.range.outputs.to }}" \
-                -t h1 \
-                -p "$side" \
-                -v \
-                -f csv \
-                -dir "$dir" \
-                -bs 40 \
-                -bp 750 \
-                -r 3 \
-                -rp 2000; then
-                return 0
-              fi
-              wait_seconds=$((attempt * 20))
-              echo "$side download failed; sleeping ${wait_seconds}s before retry"
-              sleep "$wait_seconds"
-            done
-            return 1
+          mkdir -p download/bid
+          download() {
+            npx --yes dukascopy-node@1.50.0 \
+              -i usdjpy -from "${{ needs.plan.outputs.from }}" -to "${{ needs.plan.outputs.to }}" \
+              -t h1 -p bid -v -f csv -dir download/bid \
+              -bs 3 -bp 2000 -r 3 -rp 3000
           }
+          if ! download; then
+            echo "JSON API path failed; falling back to direct-datafeed engine 1.46.4"
+            rm -rf download/bid && mkdir -p download/bid
+            npx --yes dukascopy-node@1.46.4 \
+              -i usdjpy -from "${{ needs.plan.outputs.from }}" -to "${{ needs.plan.outputs.to }}" \
+              -t h1 -p bid -v -f csv -dir download/bid \
+              -bs 3 -bp 2000 -r 3 -rp 3000
+          fi
+          test -n "$(find download/bid -name '*.csv' -type f -print -quit)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: usdjpy-h1-bid
+          path: download/bid/*.csv
+          if-no-files-found: error
+          retention-days: 1
 
-          download_side bid download/bid
-          # Dukascopy can return HTTP 429 on an immediate second full-year request.
-          sleep 20
-          download_side ask download/ask
+  download_ask:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Download ask H1
+        shell: bash
+        run: |
+          mkdir -p download/ask
+          download() {
+            npx --yes dukascopy-node@1.50.0 \
+              -i usdjpy -from "${{ needs.plan.outputs.from }}" -to "${{ needs.plan.outputs.to }}" \
+              -t h1 -p ask -v -f csv -dir download/ask \
+              -bs 3 -bp 2000 -r 3 -rp 3000
+          }
+          if ! download; then
+            echo "JSON API path failed; falling back to direct-datafeed engine 1.46.4"
+            rm -rf download/ask && mkdir -p download/ask
+            npx --yes dukascopy-node@1.46.4 \
+              -i usdjpy -from "${{ needs.plan.outputs.from }}" -to "${{ needs.plan.outputs.to }}" \
+              -t h1 -p ask -v -f csv -dir download/ask \
+              -bs 3 -bp 2000 -r 3 -rp 3000
+          fi
+          test -n "$(find download/ask -name '*.csv' -type f -print -quit)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: usdjpy-h1-ask
+          path: download/ask/*.csv
+          if-no-files-found: error
+          retention-days: 1
 
-          find download -type f -maxdepth 4 -print
+  build:
+    needs: [plan, download_bid, download_ask]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      pages_enabled: ${{ steps.pages.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: usdjpy-h1-bid
+          path: download/bid
+      - uses: actions/download-artifact@v4
+        with:
+          name: usdjpy-h1-ask
+          path: download/ask
 
-      - name: Build matched H1 mid, merge and validate rolling year
+      - name: Build matched H1 mid and validate
         shell: bash
         run: |
           RESET_ARG=""
-          if [ "${{ steps.range.outputs.reset }}" = "true" ]; then RESET_ARG="--reset-existing"; fi
+          if [ "${{ needs.plan.outputs.reset }}" = "true" ]; then RESET_ARG="--reset-existing"; fi
           python scripts/merge_data.py \
             --bid-dir download/bid \
             --ask-dir download/ask \
@@ -133,7 +173,7 @@ jobs:
             $RESET_ARG
           python -m py_compile scripts/merge_data.py
           node --check app.js
-          node --check pnl-chart.js
+          node --check pnl-chart-v3.js
           wc -l data/usdjpy_h1.csv
           cat data/meta.json
 
@@ -155,7 +195,7 @@ jobs:
         run: |
           rm -rf _site
           mkdir -p _site
-          cp index.html styles.css app.js pnl-chart.js _site/
+          cp index.html styles.css app.js pnl-chart-v3.js _site/
           cp -R data _site/data
           touch _site/.nojekyll
 
@@ -170,25 +210,16 @@ jobs:
           code=$(curl -sS -o /tmp/pages.json -w "%{http_code}" "${headers[@]}" "$api")
           if [ "$code" = "200" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
-            cat /tmp/pages.json || true
             exit 0
           fi
-
           create_code=$(curl -sS -o /tmp/pages-create.json -w "%{http_code}" -X POST \
             "${headers[@]}" -H "Content-Type: application/json" \
             -d '{"build_type":"workflow"}' "$api")
-          echo "Pages enable attempt: HTTP $create_code"
-          cat /tmp/pages-create.json || true
-          if [ "$create_code" = "201" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          fi
+          if [ "$create_code" = "201" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"; else echo "enabled=false" >> "$GITHUB_OUTPUT"; fi
 
       - name: Configure Pages
         if: steps.pages.outputs.enabled == 'true'
         uses: actions/configure-pages@v5
-
       - name: Upload Pages artifact
         if: steps.pages.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v3
