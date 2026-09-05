@@ -85,33 +85,38 @@ jobs:
           rm -rf download
           mkdir -p download/bid download/ask
 
-          npx --yes dukascopy-node@1.50.0 \
-            -i usdjpy \
-            -from "${{ steps.range.outputs.from }}" \
-            -to "${{ steps.range.outputs.to }}" \
-            -t h1 \
-            -p bid \
-            -v \
-            -f csv \
-            -dir download/bid \
-            -bs 40 \
-            -bp 250 \
-            -r 2 \
-            -rp 750
+          download_side() {
+            side="$1"
+            dir="$2"
+            for attempt in 1 2 3 4; do
+              echo "Downloading $side H1, attempt $attempt/4"
+              rm -f "$dir"/*.csv || true
+              if npx --yes dukascopy-node@1.50.0 \
+                -i usdjpy \
+                -from "${{ steps.range.outputs.from }}" \
+                -to "${{ steps.range.outputs.to }}" \
+                -t h1 \
+                -p "$side" \
+                -v \
+                -f csv \
+                -dir "$dir" \
+                -bs 40 \
+                -bp 750 \
+                -r 3 \
+                -rp 2000; then
+                return 0
+              fi
+              wait_seconds=$((attempt * 20))
+              echo "$side download failed; sleeping ${wait_seconds}s before retry"
+              sleep "$wait_seconds"
+            done
+            return 1
+          }
 
-          npx --yes dukascopy-node@1.50.0 \
-            -i usdjpy \
-            -from "${{ steps.range.outputs.from }}" \
-            -to "${{ steps.range.outputs.to }}" \
-            -t h1 \
-            -p ask \
-            -v \
-            -f csv \
-            -dir download/ask \
-            -bs 40 \
-            -bp 250 \
-            -r 2 \
-            -rp 750
+          download_side bid download/bid
+          # Dukascopy can return HTTP 429 on an immediate second full-year request.
+          sleep 20
+          download_side ask download/ask
 
           find download -type f -maxdepth 4 -print
 
