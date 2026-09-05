@@ -1,9 +1,10 @@
-.equity-html-chart{
+#equityChart.equity-html-chart{
   display:grid;
   grid-template-columns:52px minmax(0,1fr);
   grid-template-rows:260px auto;
   gap:0 8px;
   width:100%;
+  height:auto;
   min-height:286px;
   overflow:hidden;
 }
@@ -27,7 +28,7 @@
 .equity-summary{grid-column:2;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 2px 0;color:#6f859d;font-size:10px}
 .equity-summary strong{font-size:12px}
 @media(max-width:720px){
-  .equity-html-chart{grid-template-columns:42px minmax(0,1fr);grid-template-rows:230px auto;min-height:254px}
+  #equityChart.equity-html-chart{grid-template-columns:42px minmax(0,1fr);grid-template-rows:230px auto;min-height:254px}
   .equity-ylabels,.equity-plot{height:230px}
   .equity-stem{width:max(2px,.55%)}
 }
