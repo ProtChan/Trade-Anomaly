@@ -15,13 +15,13 @@ permissions:
   id-token: write
 
 concurrency:
-  group: trade-anomaly-mid-v4
+  group: trade-anomaly-mid-v5
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     outputs:
       pages_enabled: ${{ steps.pages.outputs.enabled }}
     steps:
@@ -31,19 +31,19 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Set clean rolling-year range
+      - name: Set rolling-year and recent tick ranges
         id: range
         shell: bash
         run: |
           TO=$(date -u +%F)
           FROM=$(date -u -d '366 days ago' +%F)
-          RECENT_FROM=$(date -u -d '14 days ago' +%F)
+          TICK_FROM=$(date -u -d '7 days ago' +%F)
           echo "from=$FROM" >> "$GITHUB_OUTPUT"
           echo "to=$TO" >> "$GITHUB_OUTPUT"
-          echo "recent_from=$RECENT_FROM" >> "$GITHUB_OUTPUT"
-          echo "Clean midpoint rebuild: $FROM -> $TO; recent quote refresh: $RECENT_FROM -> $TO"
+          echo "tick_from=$TICK_FROM" >> "$GITHUB_OUTPUT"
+          echo "H1 baseline: $FROM -> $TO; raw tick midpoint refresh: $TICK_FROM -> $TO"
 
-      - name: Install pinned Dukascopy full-quote downloader
+      - name: Install pinned Dukascopy downloader
         shell: bash
         run: |
           curl -fL --retry 4 --retry-delay 2 \
@@ -77,63 +77,54 @@ jobs:
           head -n 3 download/usdjpy_h1_full.csv
           test -s download/usdjpy_h1_full.csv
 
-      - name: Try current-month full Bid+Ask refresh
-        id: recent
+      - name: Download recent raw Bid+Ask ticks
         shell: bash
         run: |
-          set +e
           dukascopy-go download \
             --symbol USDJPY \
-            --timeframe h1 \
-            --from "${{ steps.range.outputs.recent_from }}" \
+            --timeframe tick \
+            --from "${{ steps.range.outputs.tick_from }}" \
             --to "${{ steps.range.outputs.to }}" \
-            --output download/usdjpy_h1_recent.csv \
-            --engine jetta \
-            --full \
+            --output download/usdjpy_recent_ticks.csv \
+            --engine datafeed \
+            --simple \
             --timezone UTC \
             --no-progress \
-            --retries 8 \
+            --retries 6 \
             --retry-backoff 2s \
-            --rate-limit 1000ms
-          rc=$?
-          set -e
-          if [ "$rc" -eq 0 ] && [ -s download/usdjpy_h1_recent.csv ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-            echo "Recent full-quote refresh available"
-            head -n 3 download/usdjpy_h1_recent.csv
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            rm -f download/usdjpy_h1_recent.csv
-            echo "Recent Jetta full-quote refresh unavailable; using datafeed baseline only"
-          fi
+            --rate-limit 100ms
+          echo "Tick CSV preview:"
+          head -n 3 download/usdjpy_recent_ticks.csv
+          test -s download/usdjpy_recent_ticks.csv
 
-      - name: Build clean rolling midpoint H1 and validate
+      - name: Build clean rolling midpoint H1 and validate September coverage
         shell: bash
         run: |
-          FILES=(--full-file download/usdjpy_h1_full.csv)
-          if [ "${{ steps.recent.outputs.available }}" = "true" ]; then
-            FILES+=(--full-file download/usdjpy_h1_recent.csv)
-          fi
           python scripts/merge_data.py \
-            "${FILES[@]}" \
+            --full-file download/usdjpy_h1_full.csv \
+            --tick-file download/usdjpy_recent_ticks.csv \
             --output data/usdjpy_h1.csv \
             --meta data/meta.json \
             --reset-existing
           python -m py_compile scripts/merge_data.py
           node --check app.js
-          node --check pnl-chart-v3.js
           python3 - <<'PY'
           import csv, json
+          from datetime import datetime, timezone
           with open('data/meta.json', encoding='utf-8') as f:
               meta = json.load(f)
           assert meta['price_type'] == 'mid', meta
-          assert int(meta.get('dataset_version', 0)) >= 2, meta
+          assert int(meta.get('dataset_version', 0)) >= 3, meta
           assert meta['bars'] >= 4000, meta
+          assert int(meta.get('raw_ticks_loaded_this_run', 0)) > 0, meta
+          sep1 = int(datetime(2026, 9, 1, tzinfo=timezone.utc).timestamp() * 1000)
+          assert int(meta['last_timestamp']) >= sep1, meta
           with open('data/usdjpy_h1.csv', newline='', encoding='utf-8') as f:
               rows = list(csv.DictReader(f))
           assert len(rows) == meta['bars']
+          assert any(int(float(r['timestamp'])) >= sep1 for r in rows), 'September rows missing'
           assert all(float(rows[i]['open']) > 0 for i in range(min(20, len(rows))))
-          print('validated clean midpoint bars:', len(rows), 'last:', meta['last_utc'])
+          print('validated midpoint bars:', len(rows), 'last:', meta['last_utc'], 'ticks:', meta['raw_ticks_loaded_this_run'])
           PY
           wc -l data/usdjpy_h1.csv
           cat data/meta.json
@@ -147,7 +138,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No data changes"
           else
-            git commit -m "data: rebuild USDJPY H1 midpoint rolling year"
+            git commit -m "data: refresh USDJPY H1 midpoint with recent raw ticks"
             git pull --rebase origin main
             git push origin HEAD:main
           fi
@@ -156,7 +147,7 @@ jobs:
         run: |
           rm -rf _site
           mkdir -p _site
-          cp index.html styles.css app.js pnl-chart-v3.js _site/
+          cp index.html styles.css chart-html.css app.js _site/
           cp -R data _site/data
           touch _site/.nojekyll
 
