@@ -106,8 +106,9 @@
   }
 
   function nearestIndexFromClientX(clientX, geometry) {
-    const x = clientX - geometry.rect.left;
-    const ratio = clamp((x - geometry.pad.l) / Math.max(1, geometry.cw), 0, 1);
+    const displayWidth = Math.max(1, geometry.rect.width);
+    const internalX = (clientX - geometry.rect.left) * (geometry.w / displayWidth);
+    const ratio = clamp((internalX - geometry.pad.l) / Math.max(1, geometry.cw), 0, 1);
     return Math.round(ratio * (geometry.pts.length - 1));
   }
 
@@ -156,7 +157,6 @@
     if (!p.trade) return;
 
     const canvas = ui.canvas;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const ctx = canvas.getContext('2d');
     const x = g.xScale(p.x);
     const y = g.yScale(p.y);
@@ -181,10 +181,12 @@
       const wrapRect = wrap.getBoundingClientRect();
       const tipW = ui.tooltip.offsetWidth || 178;
       const tipH = ui.tooltip.offsetHeight || 92;
-      let left = (canvasRect.left - wrapRect.left) + x + 12;
-      if (left + tipW > wrap.clientWidth - 8) left = (canvasRect.left - wrapRect.left) + x - tipW - 12;
+      const displayX = x * (canvasRect.width / g.w);
+      const displayY = y * (canvasRect.height / g.h);
+      let left = (canvasRect.left - wrapRect.left) + displayX + 12;
+      if (left + tipW > wrap.clientWidth - 8) left = (canvasRect.left - wrapRect.left) + displayX - tipW - 12;
       left = clamp(left, 8, Math.max(8, wrap.clientWidth - tipW - 8));
-      let top = (canvasRect.top - wrapRect.top) + y - tipH / 2;
+      let top = (canvasRect.top - wrapRect.top) + displayY - tipH / 2;
       top = clamp(top, 42, Math.max(42, wrap.clientHeight - tipH - 8));
       ui.tooltip.style.left = `${left}px`;
       ui.tooltip.style.top = `${top}px`;
